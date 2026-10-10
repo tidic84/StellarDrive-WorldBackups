@@ -56,6 +56,9 @@ namespace WorldBackups
 #if SELFTEST
             MelonCoroutines.Start(SelfTest());
 #endif
+#if SHOTS
+            MelonCoroutines.Start(Screenshots());
+#endif
 #if UIDUMP
             MelonCoroutines.Start(UiDump());
 #endif

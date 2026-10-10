@@ -5,6 +5,20 @@ Packaged for [Stellar Mod Manager](https://github.com/jollyname/StellarModManage
 
 ![thumbnail](Mods/Thumbnail.png)
 
+## Screenshots
+
+**Escape menu** — the current world's backups:
+
+![Backups list in the Escape menu](docs/pause_backups.jpg)
+
+**Backup details** — screenshot, note, and the *Load*, *Restore*, *Delete*, *New world* and *Note* actions:
+
+![Backup details in the Escape menu](docs/pause_details.jpg)
+
+**Main menu** — pick a world, then one of its backups:
+
+![Backups from the main menu](docs/menu_details.jpg)
+
 ## Features
 
 - **Native menus** — the screens are built from the game's own menu pieces (world rows with thumbnails, world details panel, delete and rename dialogs), so they look and behave like the rest of StellarDrive.

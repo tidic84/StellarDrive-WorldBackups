@@ -27,7 +27,7 @@
     <Reference Include="Unity.Localization"><HintPath>$(ManagedPath)\Unity.Localization.dll</HintPath><Private>false</Private></Reference>
     <Reference Include="UnityEngine.TextRenderingModule"><HintPath>$(ManagedPath)\UnityEngine.TextRenderingModule.dll</HintPath><Private>false</Private></Reference>
     <Reference Include="UnityEngine.ImageConversionModule"><HintPath>$(ManagedPath)\UnityEngine.ImageConversionModule.dll</HintPath><Private>false</Private></Reference>
-    <Reference Include="UnityEngine.ScreenCaptureModule" Condition="$(DefineConstants.Contains('SELFTEST')) Or $(DefineConstants.Contains('UIDUMP'))"><HintPath>$(ManagedPath)\UnityEngine.ScreenCaptureModule.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="UnityEngine.ScreenCaptureModule" Condition="$(DefineConstants.Contains('SELFTEST')) Or $(DefineConstants.Contains('UIDUMP')) Or $(DefineConstants.Contains('SHOTS'))"><HintPath>$(ManagedPath)\UnityEngine.ScreenCaptureModule.dll</HintPath><Private>false</Private></Reference>
     <Reference Include="UnityEngine.JSONSerializeModule"><HintPath>$(ManagedPath)\UnityEngine.JSONSerializeModule.dll</HintPath><Private>false</Private></Reference>
     <Reference Include="Core"><HintPath>$(ManagedPath)\Core.dll</HintPath><Private>false</Private></Reference>
     <Reference Include="Managers.Interface"><HintPath>$(ManagedPath)\Managers.Interface.dll</HintPath><Private>false</Private></Reference>

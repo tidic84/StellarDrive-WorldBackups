@@ -19,6 +19,14 @@ Packaged for [Stellar Mod Manager](https://github.com/jollyname/StellarModManage
 
 ![Backups from the main menu](docs/menu_details.jpg)
 
+## How it works with the game's saves
+
+The backup system is independent: the mod keeps its own copies of your worlds in a separate `WorldBackups` folder and never changes how the game saves. It works hand in hand with the game's native saves and backups:
+
+- it backs up the game's own world folders (`WorldSaves\<world>`), and saves through the game's own save before a manual backup in game;
+- the game's own rolling autosaves (`backup_*.json`) show up in the same list and can be restored or deleted like the mod's backups;
+- a restored world is a normal game save, so it shows up in the game's world list as usual, even without the mod.
+
 ## Features
 
 - **Native menus** — the screens are built from the game's own menu pieces (world rows with thumbnails, world details panel, delete and rename dialogs), so they look and behave like the rest of StellarDrive.

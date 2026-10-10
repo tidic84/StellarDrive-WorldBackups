@@ -1,0 +1,8 @@
+{
+    "id": "world_backups",
+    "name": "World Backups",
+    "author": "tidic84",
+    "version": "1.0.0",
+    "description": "Create, browse, restore and load backups of your worlds from an in-game window (F8, or the button in the main menu). Automatic backup every time a world is loaded, safety backup before every restore, and the game's own autosaves can be restored too.",
+    "thumbnail": "Thumbnail.png"
+}

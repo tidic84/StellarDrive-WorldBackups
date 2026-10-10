@@ -7,17 +7,19 @@ Packaged for [Stellar Mod Manager](https://github.com/jollyname/StellarModManage
 
 ## Features
 
-- **Backup window** — press **F8** (anywhere) or click the *World Backups* button in the top-right corner of the main menu.
-- **Manual backups** with an optional note. In game, *Save + back up* saves the running world first, so the backup holds the latest state.
+- **Native menus** — the screens are built from the game's own menu pieces (world rows with thumbnails, world details panel, delete and rename dialogs), so they look and behave like the rest of StellarDrive.
+- **Escape menu** — a *Backups* entry under *Save* opens the current world's backups, then a backup's details: screenshot, *Load*, *Restore*, *Delete*, *New world*, *Note*.
+- **Main menu** — a *Backups* entry under *Join game*: pick a world, then one of its backups.
+- **Manual backups** (*+ Create a backup*) with an optional note. On the world you are playing, the game is saved first, so the backup holds the latest state.
 - **Automatic backup** each time you load one of your worlds (the 10 most recent are kept per world).
 - **Load** — restores a backup into its world and launches it straight away (solo, or hosting on Steam if the toggle is on).
 - **Restore** — puts the world back to that backup without launching it.
 - **New world** — restores a backup as a separate world, so the original stays untouched.
 - **Safety backup** — before any restore, the current state of the world is backed up first (5 kept per world), so a restore can always be undone.
 - The game's own rolling autosaves (`backup_*.json`, made every 10 minutes) are listed too, and can be restored or deleted.
-- Screenshot preview, notes, size, delete, open folder. UI in English and French (follows the system language).
+- English and French text (follows the language chosen in the game options).
 
-Restore and load only work from the main menu, never while a world is running.
+From inside a game, *Load* saves the current game, goes back to the main menu, restores the backup and relaunches the world. *Restore* on the world you are playing does the same but stays in the main menu. Restoring another world, or restoring as a new world, happens right away.
 
 ## Where backups live
 
@@ -35,14 +37,12 @@ Each backup is a plain copy of the world folder plus a `backup-info.json`, so yo
 
 | Key | Default | Meaning |
 | --- | --- | --- |
-| `ToggleKey` | `F8` | Key that opens and closes the window (a `UnityEngine.KeyCode` name) |
 | `AutoBackupOnWorldLoad` | `true` | Make a backup each time a world is loaded |
 | `MaxAutoBackupsPerWorld` | `10` | Automatic backups kept per world (0 = all) |
 | `SafetyBackupBeforeRestore` | `true` | Back up the world before it is overwritten |
 | `MaxSafetyBackupsPerWorld` | `5` | Safety backups kept per world (0 = all) |
-| `ShowMainMenuButton` | `true` | Show the button in the main menu |
-| `Language` | `auto` | `auto`, `en` or `fr` |
-| `UiScale` | `0` | Window scale (0 = based on screen height) |
+| `ShowMainMenuButton` | `true` | Add the Backups entry to the main menu |
+| `Language` | `auto` | `auto` (game language), `en` or `fr` |
 
 ## Building
 

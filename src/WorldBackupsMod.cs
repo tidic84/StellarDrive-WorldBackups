@@ -1,10 +1,10 @@
 using System;
 using System.Collections;
-using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using Core.Services;
 using Managers.Interface;
+using Managers.Interface.Services;
 using MelonLoader;
 using Saving.Interface.Model;
 using Saving.Services;
@@ -19,77 +19,45 @@ namespace WorldBackups
 {
     public partial class WorldBackupsMod : MelonMod
     {
-        private const string MainGameScene = "MainGame";
-        private const string StartServerPrefKey = "StartServer"; // same key as the game's own "start server" toggle
+        internal const string MainGameScene = "MainGame";
+        internal const string StartServerPrefKey = "StartServer"; // same key as the game's own "start server" toggle
 
-        private MelonPreferences_Entry<string> _toggleKey;
+        internal static WorldBackupsMod Instance { get; private set; }
+
         private MelonPreferences_Entry<bool> _autoBackupOnLoad;
         private MelonPreferences_Entry<int> _maxAutoBackups;
         private MelonPreferences_Entry<bool> _safetyBackup;
         private MelonPreferences_Entry<int> _maxSafetyBackups;
         private MelonPreferences_Entry<bool> _showMenuButton;
         private MelonPreferences_Entry<string> _language;
-        private MelonPreferences_Entry<float> _uiScale;
 
-        private BackupStore _store;
-        private KeyCode _key = KeyCode.F8;
+        internal BackupStore Store { get; private set; }
 
-        // UI state
-        private bool _open;
-        private Rect _window = new Rect(60, 60, 900, 580);
-        private Vector2 _worldScroll;
-        private Vector2 _backupScroll;
-        private List<string> _worlds = new List<string>();
-        private string _selectedWorld;
-        private List<BackupEntry> _backups = new List<BackupEntry>();
-        private BackupEntry _selectedBackup;
-        private string _newLabel = "";
-        private string _status = "";
-        private bool _statusIsError;
-        private bool _busySaving;
+        internal static bool InGame => SceneManager.GetActiveScene().name == MainGameScene;
 
-        private enum Pending { None, Restore, Load, Delete, NewWorld, EditLabel }
-        private Pending _pending;
-        private BackupEntry _pendingTarget;
-        private string _pendingText = "";
-
-        private readonly Dictionary<string, Texture2D> _thumbnails = new Dictionary<string, Texture2D>();
-
-        private CursorLockMode _prevLock;
-        private bool _prevVisible;
-
-        private GUIStyle _windowStyle, _rowStyle, _rowSelectedStyle,_mutedStyle, _headerStyle, _statusStyle, _errorStyle, _wrapStyle;
-        private Texture2D _bgTex, _rowTex, _rowSelTex;
-
-        private static bool InGame => SceneManager.GetActiveScene().name == MainGameScene;
-
-        private static bool IsClient =>
+        internal static bool IsClient =>
             MainGameSceneLoadData.Mode == MainGameSceneLoadData.GameMode.JoinGameSteam ||
             MainGameSceneLoadData.Mode == MainGameSceneLoadData.GameMode.JoinGameIp;
 
         public override void OnInitializeMelon()
         {
+            Instance = this;
             var cat = MelonPreferences.CreateCategory("WorldBackups", "World Backups");
-            _toggleKey = cat.CreateEntry("ToggleKey", "F8", "Toggle key", "Key that opens/closes the backup window (UnityEngine.KeyCode name).");
             _autoBackupOnLoad = cat.CreateEntry("AutoBackupOnWorldLoad", true, "Auto backup on world load", "Make a backup every time you load one of your worlds.");
             _maxAutoBackups = cat.CreateEntry("MaxAutoBackupsPerWorld", 10, "Max auto backups per world", "Oldest automatic backups beyond this count are deleted (0 = keep all).");
             _safetyBackup = cat.CreateEntry("SafetyBackupBeforeRestore", true, "Safety backup before restore", "Back up the current world before it gets overwritten by a restore.");
             _maxSafetyBackups = cat.CreateEntry("MaxSafetyBackupsPerWorld", 5, "Max safety backups per world", "Oldest safety backups beyond this count are deleted (0 = keep all).");
-            _showMenuButton = cat.CreateEntry("ShowMainMenuButton", true, "Main menu button", "Show a small button in the main menu to open the window.");
-            _language = cat.CreateEntry("Language", "auto", "Language", "auto, en or fr.");
-            _uiScale = cat.CreateEntry("UiScale", 0f, "UI scale", "Window scale factor (0 = automatic from screen height).");
+            _showMenuButton = cat.CreateEntry("ShowMainMenuButton", true, "Main menu entry", "Add a Backups entry to the main menu.");
+            _language = cat.CreateEntry("Language", "auto", "Language", "auto (follows the game language), en or fr.");
 
-            if (!Enum.TryParse(_toggleKey.Value, true, out _key))
-            {
-                LoggerInstance.Warning($"Unknown ToggleKey '{_toggleKey.Value}', using F8.");
-                _key = KeyCode.F8;
-            }
-
-            Loc.Init(_language.Value);
-            _store = new BackupStore(Application.persistentDataPath);
-            LoggerInstance.Msg($"Backups folder: {_store.BackupsRoot} (press {_key} to open)");
+            Store = new BackupStore(Application.persistentDataPath);
+            InstallPauseMenuHooks();
+            LoggerInstance.Msg($"Backups folder: {Store.BackupsRoot}");
 #if SELFTEST
             MelonCoroutines.Start(SelfTest());
+#endif
+#if UIDUMP
+            MelonCoroutines.Start(UiDump());
 #endif
         }
 
@@ -97,93 +65,40 @@ namespace WorldBackups
         {
             if (sceneName == MainGameScene)
             {
-                if (_autoBackupOnLoad.Value && !IsClient)
+                if (_autoBackupOnLoad.Value && !IsClient && _deferred == null)
                     AutoBackupCurrentWorld();
             }
-            else if (_open)
+            else if (buildIndex == 0)
             {
-                Reload();
+                MelonCoroutines.Start(SetUpMainMenu());
             }
         }
 
-        public override void OnUpdate()
+        private IEnumerator SetUpMainMenu()
         {
-            if (_open)
+            // Wait for the menu's own Awake/Start (world list, navigation) before cloning its pieces.
+            for (int i = 0; i < 5; i++)
+                yield return null;
+
+            Loc.Init(_language.Value);
+            try
             {
-                // The game re-locks the cursor while flying/walking; keep it free while our window is up.
-                Cursor.lockState = CursorLockMode.None;
-                Cursor.visible = true;
+                NativeUi.CaptureTemplates(LoggerInstance);
+                if (_showMenuButton.Value)
+                    NativeUi.AddMainMenuEntry(LoggerInstance);
             }
+            catch (Exception ex)
+            {
+                LoggerInstance.Error($"Main menu integration failed: {ex}");
+            }
+
+            if (_deferred != null)
+                yield return RunDeferred();
         }
 
-        public override void OnGUI()
-        {
-            Event e = Event.current;
-            if (e.type == EventType.KeyDown && e.keyCode == _key && !IsTyping())
-            {
-                SetOpen(!_open);
-                e.Use();
-            }
+        // ---------------------------------------------------------------- world helpers
 
-            if (_busySaving)
-                return; // stay out of the game's save screenshot
-
-            EnsureStyles();
-
-            // IMGUI is pixel-based: scale it so the window stays readable at 1440p/4K.
-            float scale = _uiScale.Value > 0f ? _uiScale.Value : Mathf.Max(1f, Screen.height / 1080f);
-            GUI.matrix = Matrix4x4.Scale(new Vector3(scale, scale, 1f));
-            float screenW = Screen.width / scale;
-            float screenH = Screen.height / scale;
-
-            if (!_open)
-            {
-                if (_showMenuButton.Value && !InGame && SceneManager.GetActiveScene().buildIndex == 0)
-                {
-                    if (GUI.Button(new Rect(screenW - 236, 16, 220, 34), Loc.T("OpenButton", _key)))
-                        SetOpen(true);
-                }
-                return;
-            }
-
-            _window.width = Mathf.Min(900, screenW - 20);
-            _window.height = Mathf.Min(580, screenH - 20);
-            _window.x = Mathf.Clamp(_window.x, 0, screenW - _window.width);
-            _window.y = Mathf.Clamp(_window.y, 0, screenH - _window.height);
-            _window = GUI.Window(0x57B4C, _window, DrawWindow, Loc.T("Title"), _windowStyle);
-        }
-
-        private static bool IsTyping() => GUIUtility.keyboardControl != 0;
-
-        private void SetOpen(bool open)
-        {
-            if (open == _open)
-                return;
-
-            _open = open;
-            if (open)
-            {
-                _prevLock = Cursor.lockState;
-                _prevVisible = Cursor.visible;
-                _status = "";
-                Reload();
-            }
-            else
-            {
-                _pending = Pending.None;
-                GUIUtility.keyboardControl = 0;
-                if (InGame)
-                {
-                    Cursor.lockState = _prevLock;
-                    Cursor.visible = _prevVisible;
-                }
-                ClearThumbnails();
-            }
-        }
-
-        // ---------------------------------------------------------------- data
-
-        private string CurrentWorldName()
+        internal string CurrentWorldName()
         {
             string file = MainGameSceneLoadData.SaveFileFullName;
             if (string.IsNullOrEmpty(file))
@@ -192,7 +107,7 @@ namespace WorldBackups
             {
                 string dir = Path.GetDirectoryName(Path.GetFullPath(file));
                 string parent = Path.GetDirectoryName(dir);
-                if (string.Equals(Path.GetFullPath(parent), Path.GetFullPath(_store.SavesRoot), StringComparison.OrdinalIgnoreCase))
+                if (string.Equals(Path.GetFullPath(parent), Store.SavesRoot, StringComparison.OrdinalIgnoreCase))
                     return Path.GetFileName(dir);
             }
             catch
@@ -201,39 +116,15 @@ namespace WorldBackups
             return null;
         }
 
-        private void Reload()
-        {
-            try
-            {
-                _worlds = _store.ListWorlds();
-                if (InGame && CurrentWorldName() is string current && _worlds.Contains(current))
-                    _selectedWorld = current;
-                if (_selectedWorld == null || !_worlds.Contains(_selectedWorld))
-                    _selectedWorld = _worlds.FirstOrDefault();
-                ReloadBackups();
-            }
-            catch (Exception ex)
-            {
-                SetError(ex);
-            }
-        }
-
-        private void ReloadBackups()
-        {
-            string selectedPath = _selectedBackup?.Path;
-            _backups = _selectedWorld == null ? new List<BackupEntry>() : _store.ListBackups(_selectedWorld);
-            _selectedBackup = _backups.FirstOrDefault(b => b.Path == selectedPath) ?? _backups.FirstOrDefault();
-        }
-
         private void AutoBackupCurrentWorld()
         {
             string world = CurrentWorldName();
-            if (world == null || !_store.WorldExists(world))
+            if (world == null || !Store.WorldExists(world))
                 return;
             try
             {
-                _store.CreateBackup(world, "", BackupKind.Auto);
-                _store.Prune(world, BackupKind.Auto, _maxAutoBackups.Value);
+                Store.CreateBackup(world, "", BackupKind.Auto);
+                Store.Prune(world, BackupKind.Auto, _maxAutoBackups.Value);
                 LoggerInstance.Msg($"Automatic backup of '{world}' created.");
             }
             catch (Exception ex)
@@ -242,29 +133,49 @@ namespace WorldBackups
             }
         }
 
-        private void DoCreateBackup()
-        {
-            string world = _selectedWorld;
-            string label = _newLabel.Trim();
+        // ---------------------------------------------------------------- actions used by the UI
 
-            if (InGame && world == CurrentWorldName() && !IsClient)
+        internal bool IsBusy { get; private set; }
+
+        /// <summary>Creates a manual backup. When it is the running world, the game is saved first so the backup is up to date.</summary>
+        internal void CreateBackup(string world, string label, Action<BackupEntry> done, Action<string> fail)
+        {
+            if (InGame && !IsClient && world == CurrentWorldName())
             {
-                // Flush the running game to disk first so the backup holds the latest state.
                 var saver = ServiceLocator.GetService<GameSaver>();
                 if (saver != null)
                 {
-                    MelonCoroutines.Start(SaveThenBackup(saver, world, label));
+                    MelonCoroutines.Start(SaveGameThen(saver, () => FinishBackup(world, label, done, fail)));
                     return;
                 }
             }
-
-            FinishBackup(world, label);
+            FinishBackup(world, label, done, fail);
         }
 
-        private IEnumerator SaveThenBackup(GameSaver saver, string world, string label)
+        private void FinishBackup(string world, string label, Action<BackupEntry> done, Action<string> fail)
         {
-            SetStatus(Loc.T("Saving"));
-            _busySaving = true;
+            try
+            {
+                BackupEntry entry = Store.CreateBackup(world, label, BackupKind.Manual);
+                LoggerInstance.Msg($"Backup of '{world}' created: {entry.Path}");
+                done?.Invoke(entry);
+            }
+            catch (Exception ex)
+            {
+                LoggerInstance.Error(ex.ToString());
+                fail?.Invoke(ex.Message);
+            }
+        }
+
+        private IEnumerator SaveGameThen(GameSaver saver, Action then)
+        {
+            IsBusy = true;
+            // The game screenshots the screen while saving: keep the pause menu out of the picture.
+            var hidden = UnityEngine.Object.FindObjectsByType<Canvas>(FindObjectsSortMode.None)
+                .Where(c => c.isRootCanvas && c.enabled && c.name.StartsWith("PauseCanvas", StringComparison.Ordinal))
+                .ToList();
+            foreach (var c in hidden)
+                c.enabled = false;
             yield return null;
 
             try
@@ -274,127 +185,172 @@ namespace WorldBackups
             }
             catch (Exception ex)
             {
-                LoggerInstance.Warning($"Game save before backup failed: {ex.Message}");
+                LoggerInstance.Warning($"Game save failed: {ex.Message}");
             }
 
             float deadline = Time.realtimeSinceStartup + 15f;
             while (saver != null && saver.IsCurrentlySaving() && Time.realtimeSinceStartup < deadline)
                 yield return null;
 
-            _busySaving = false;
-            FinishBackup(world, label);
+            foreach (var c in hidden)
+                if (c != null)
+                    c.enabled = true;
+            IsBusy = false;
+            then();
         }
 
-        private void FinishBackup(string world, string label)
+        /// <summary>True when restoring this backup has to leave the running game first.</summary>
+        internal bool RestoreLeavesGame(BackupEntry backup) => InGame && backup.World == CurrentWorldName();
+
+        internal void Restore(BackupEntry backup, Action done, Action<string> fail)
         {
+            if (RestoreLeavesGame(backup))
+            {
+                LeaveGameThen(backup, launch: false);
+                return;
+            }
+            if (RestoreInto(backup, backup.World, fail))
+                done?.Invoke();
+        }
+
+        internal void Load(BackupEntry backup, Action<string> fail)
+        {
+            if (InGame)
+            {
+                LeaveGameThen(backup, launch: true);
+                return;
+            }
+            if (RestoreInto(backup, backup.World, fail))
+                LaunchWorld(backup.World);
+        }
+
+        internal bool RestoreAsNewWorld(BackupEntry backup, string name, out string error)
+        {
+            error = BackupStore.ValidateNewWorldName(name, Store);
+            if (error != null)
+            {
+                error = Loc.T(error == "empty" ? "NameEmpty" : error == "exists" ? "NameExists" : "NameInvalid");
+                return false;
+            }
             try
             {
-                BackupEntry entry = _store.CreateBackup(world, label, BackupKind.Manual);
-                _newLabel = "";
-                ReloadBackups();
-                _selectedBackup = _backups.FirstOrDefault(b => b.Path == entry.Path) ?? _selectedBackup;
-                SetStatus(Loc.T("Created"));
-                LoggerInstance.Msg($"Backup of '{world}' created: {entry.Path}");
+                Store.Restore(backup, name);
+                RefreshGameWorldList();
+                LoggerInstance.Msg($"Backup '{backup.Path}' restored as new world '{name}'.");
+                return true;
             }
             catch (Exception ex)
             {
-                SetError(ex);
+                LoggerInstance.Error(ex.ToString());
+                error = ex.Message;
+                return false;
             }
         }
 
-        private bool RestoreInto(BackupEntry backup, string world)
+        internal bool Delete(BackupEntry backup, out string error)
+        {
+            error = null;
+            try
+            {
+                Store.Delete(backup);
+                return true;
+            }
+            catch (Exception ex)
+            {
+                LoggerInstance.Error(ex.ToString());
+                error = ex.Message;
+                return false;
+            }
+        }
+
+        private bool RestoreInto(BackupEntry backup, string world, Action<string> fail)
         {
             try
             {
-                if (_safetyBackup.Value && _store.WorldExists(world))
+                if (_safetyBackup.Value && Store.WorldExists(world))
                 {
-                    _store.CreateBackup(world, "", BackupKind.Safety);
-                    _store.Prune(world, BackupKind.Safety, _maxSafetyBackups.Value);
+                    Store.CreateBackup(world, "", BackupKind.Safety);
+                    Store.Prune(world, BackupKind.Safety, _maxSafetyBackups.Value);
                 }
 
-                _store.Restore(backup, world);
+                Store.Restore(backup, world);
                 LoggerInstance.Msg($"Restored '{backup.Path}' into world '{world}'.");
                 RefreshGameWorldList();
                 return true;
             }
             catch (Exception ex)
             {
-                SetError(ex);
+                LoggerInstance.Error(ex.ToString());
+                fail?.Invoke(ex.Message);
                 return false;
             }
         }
 
-        private void DoRestore(BackupEntry backup)
+        private class DeferredRestore
         {
-            if (RestoreInto(backup, backup.World))
-            {
-                Reload();
-                SetStatus(Loc.T("Restored", backup.World));
-            }
+            public BackupEntry Backup;
+            public bool Launch;
         }
 
-        private void DoLoad(BackupEntry backup)
+        private DeferredRestore _deferred;
+
+        /// <summary>Saves the running world (so the safety backup holds the latest progress), quits to the main menu,
+        /// then <see cref="RunDeferred"/> restores (and optionally relaunches) once the menu is up.</summary>
+        private void LeaveGameThen(BackupEntry backup, bool launch)
         {
-            if (!RestoreInto(backup, backup.World))
-                return;
-            LaunchWorld(backup.World);
+            _deferred = new DeferredRestore { Backup = backup, Launch = launch };
+            var saver = IsClient || CurrentWorldName() == null ? null : ServiceLocator.GetService<GameSaver>();
+            if (saver != null)
+                MelonCoroutines.Start(SaveGameThen(saver, QuitToMainMenu));
+            else
+                QuitToMainMenu();
         }
 
-        private void DoNewWorld(BackupEntry backup, string name)
+        private void QuitToMainMenu()
         {
-            string error = BackupStore.ValidateNewWorldName(name, _store);
-            if (error != null)
-            {
-                SetStatus(Loc.T(error == "empty" ? "NameEmpty" : error == "exists" ? "NameExists" : "NameInvalid"), true);
-                return;
-            }
-
+            LoggerInstance.Msg("Leaving the world to restore a backup.");
             try
             {
-                _store.Restore(backup, name);
-                RefreshGameWorldList();
-                _selectedWorld = name;
-                _pending = Pending.None;
-                Reload();
-                SetStatus(Loc.T("CreatedWorld", name));
+                // Same as the pause menu's "quit to main menu" button.
+                ServiceLocator.GetService<INetworkConnectionStopService>()?.StopConnection();
             }
             catch (Exception ex)
             {
-                SetError(ex);
+                LoggerInstance.Warning($"StopConnection failed: {ex.Message}");
             }
+            SceneManager.LoadScene(0, LoadSceneMode.Single);
         }
 
-        private void DoDelete(BackupEntry backup)
+        private IEnumerator RunDeferred()
         {
-            try
+            DeferredRestore job = _deferred;
+            _deferred = null;
+            yield return null;
+
+            string error = null;
+            if (!RestoreInto(job.Backup, job.Backup.World, e => error = e))
             {
-                _store.Delete(backup);
-                if (_thumbnails.TryGetValue(backup.ScreenshotPath ?? "", out Texture2D tex))
-                {
-                    UnityEngine.Object.Destroy(tex);
-                    _thumbnails.Remove(backup.ScreenshotPath);
-                }
-                ReloadBackups();
-                SetStatus(Loc.T("Deleted"));
+                NativeUi.ShowMessageInMainMenu(Loc.T("Error", error));
+                yield break;
             }
-            catch (Exception ex)
-            {
-                SetError(ex);
-            }
+
+            if (job.Launch)
+                LaunchWorld(job.Backup.World);
+            else
+                NativeUi.ShowMessageInMainMenu(Loc.T("Restored", job.Backup.World));
         }
 
-        private void LaunchWorld(string world)
+        internal void LaunchWorld(string world)
         {
             bool host = PlayerPrefs.GetInt(StartServerPrefKey, 0) > 0;
             MainGameSceneLoadData.Mode = host ? MainGameSceneLoadData.GameMode.HostGameSteam : MainGameSceneLoadData.GameMode.SinglePlayer;
-            MainGameSceneLoadData.SaveFileFullName = new FileInfo(_store.WorldSaveFile(world)).FullName;
+            MainGameSceneLoadData.SaveFileFullName = new FileInfo(Store.WorldSaveFile(world)).FullName;
             LoggerInstance.Msg($"Launching world '{world}' ({MainGameSceneLoadData.Mode}).");
-            SetOpen(false);
             SceneManager.LoadScene(MainGameScene, LoadSceneMode.Single);
         }
 
-        /// <summary>Makes the main menu's world list pick up restored/new worlds without restarting.</summary>
-        private void RefreshGameWorldList()
+        /// <summary>Makes the main menu's own world list pick up restored/new worlds.</summary>
+        internal void RefreshGameWorldList()
         {
             if (InGame)
                 return;
@@ -414,340 +370,12 @@ namespace WorldBackups
             }
         }
 
-        private void SetStatus(string text, bool error = false)
+        internal void OpenFolder(string world)
         {
-            _status = text;
-            _statusIsError = error;
-        }
-
-        private void SetError(Exception ex)
-        {
-            LoggerInstance.Error(ex.ToString());
-            SetStatus(Loc.T("Error", ex.Message), true);
-        }
-
-        // ---------------------------------------------------------------- drawing
-
-        private void DrawWindow(int id)
-        {
-            GUILayout.BeginHorizontal();
-            DrawWorldList();
-            GUILayout.Space(8);
-            DrawWorldPanel();
-            GUILayout.EndHorizontal();
-
-            GUILayout.FlexibleSpace();
-            GUILayout.BeginHorizontal();
-            if (!string.IsNullOrEmpty(_status))
-                GUILayout.Label(_status, _statusIsError ? _errorStyle : _statusStyle);
-            GUILayout.FlexibleSpace();
-            if (GUILayout.Button(Loc.T("OpenFolder"), GUILayout.Width(140)))
-                OpenFolder(_selectedWorld != null ? Path.Combine(_store.BackupsRoot, _selectedWorld) : _store.BackupsRoot);
-            if (GUILayout.Button(Loc.T("Refresh"), GUILayout.Width(100)))
-                Reload();
-            if (GUILayout.Button(Loc.T("Close") + $" ({_key})", GUILayout.Width(110)))
-                SetOpen(false);
-            GUILayout.EndHorizontal();
-
-            GUI.DragWindow(new Rect(0, 0, 10000, 22));
-        }
-
-        private void DrawWorldList()
-        {
-            GUILayout.BeginVertical(GUILayout.Width(210));
-            GUILayout.Label(Loc.T("Worlds"), _headerStyle);
-            _worldScroll = GUILayout.BeginScrollView(_worldScroll);
-            if (_worlds.Count == 0)
-                GUILayout.Label(Loc.T("NoWorlds"), _wrapStyle);
-
-            string current = InGame ? CurrentWorldName() : null;
-            foreach (string world in _worlds)
-            {
-                string text = world == current ? $"{world}  ({Loc.T("Current")})" : world;
-                if (GUILayout.Button(text, world == _selectedWorld ? _rowSelectedStyle : _rowStyle, GUILayout.Height(28)))
-                {
-                    _selectedWorld = world;
-                    _pending = Pending.None;
-                    _selectedBackup = null;
-                    ReloadBackups();
-                }
-            }
-            GUILayout.EndScrollView();
-            GUILayout.EndVertical();
-        }
-
-        private void DrawWorldPanel()
-        {
-            GUILayout.BeginVertical();
-            if (_selectedWorld == null)
-            {
-                GUILayout.Label(Loc.T("SelectWorld"), _wrapStyle);
-                GUILayout.EndVertical();
-                return;
-            }
-
-            bool inGame = InGame;
-            bool canCreate = !(inGame && IsClient);
-
-            GUILayout.Label(Loc.T("Backups", _selectedWorld), _headerStyle);
-
-            GUILayout.BeginHorizontal();
-            GUI.enabled = canCreate;
-            GUILayout.Label(Loc.T("LabelHint"), _mutedStyle, GUILayout.Width(120));
-            _newLabel = GUILayout.TextField(_newLabel, 60, GUILayout.MinWidth(160));
-            bool flushFirst = inGame && _selectedWorld == CurrentWorldName();
-            if (GUILayout.Button(Loc.T(flushFirst ? "SaveAndBackup" : "CreateBackup"), GUILayout.Width(150)))
-                DoCreateBackup();
-            GUI.enabled = true;
-            GUILayout.EndHorizontal();
-
-            if (inGame)
-                GUILayout.Label(Loc.T(IsClient ? "ClientNotice" : "InGameNotice"), _mutedStyle);
-            else
-            {
-                bool host = PlayerPrefs.GetInt(StartServerPrefKey, 0) > 0;
-                bool newHost = GUILayout.Toggle(host, " " + Loc.T("HostToggle"));
-                if (newHost != host)
-                    PlayerPrefs.SetInt(StartServerPrefKey, newHost ? 1 : 0);
-            }
-
-            GUILayout.Space(4);
-            GUILayout.BeginHorizontal();
-
-            // backup list
-            GUILayout.BeginVertical(GUILayout.MinWidth(340));
-            _backupScroll = GUILayout.BeginScrollView(_backupScroll);
-            if (_backups.Count == 0)
-                GUILayout.Label(Loc.T("NoBackups"), _mutedStyle);
-            foreach (BackupEntry backup in _backups)
-                DrawBackupRow(backup);
-            GUILayout.EndScrollView();
-            GUILayout.EndVertical();
-
-            // details of the selected backup
-            GUILayout.BeginVertical(GUILayout.Width(250));
-            if (_selectedBackup != null)
-                DrawBackupDetails(_selectedBackup, inGame);
-            GUILayout.EndVertical();
-
-            GUILayout.EndHorizontal();
-            GUILayout.EndVertical();
-        }
-
-        private void DrawBackupRow(BackupEntry backup)
-        {
-            string title = backup.Created.ToString("yyyy-MM-dd  HH:mm:ss");
-            string sub = KindName(backup.Kind) + "  ·  " + FormatSize(backup.SizeBytes);
-            if (!string.IsNullOrEmpty(backup.Label))
-                sub += "  ·  " + backup.Label;
-
-            if (GUILayout.Button(title + "\n" + sub, backup == _selectedBackup ? _rowSelectedStyle : _rowStyle, GUILayout.Height(40)))
-            {
-                if (_selectedBackup != backup)
-                    _pending = Pending.None;
-                _selectedBackup = backup;
-            }
-        }
-
-        private void DrawBackupDetails(BackupEntry backup, bool inGame)
-        {
-            Texture2D thumb = GetThumbnail(backup.ScreenshotPath);
-            if (thumb != null)
-                GUILayout.Box(thumb, GUIStyle.none, GUILayout.Width(250), GUILayout.Height(140));
-
-            GUILayout.Label(backup.Created.ToString("F", Loc.Culture), _wrapStyle);
-            GUILayout.Label(KindName(backup.Kind) + (string.IsNullOrEmpty(backup.Label) ? "" : " — " + backup.Label), _mutedStyle);
-            GUILayout.Space(6);
-
-            if (_pending != Pending.None && _pendingTarget == backup)
-            {
-                DrawPending(backup);
-                return;
-            }
-
-            GUI.enabled = !inGame;
-            GUILayout.BeginHorizontal();
-            if (GUILayout.Button(Loc.T("Load"), GUILayout.Height(30)))
-                Ask(Pending.Load, backup);
-            if (GUILayout.Button(Loc.T("Restore"), GUILayout.Height(30)))
-                Ask(Pending.Restore, backup);
-            GUILayout.EndHorizontal();
-            if (GUILayout.Button(Loc.T("AsNewWorld")))
-                Ask(Pending.NewWorld, backup, $"{backup.World} {backup.Created:yyyy-MM-dd HH-mm}");
-            GUI.enabled = true;
-
-            GUILayout.BeginHorizontal();
-            GUI.enabled = !backup.IsGameBackup;
-            if (GUILayout.Button(Loc.T("Rename")))
-                Ask(Pending.EditLabel, backup, backup.Label);
-            GUI.enabled = true;
-            if (GUILayout.Button(Loc.T("Delete")))
-                Ask(Pending.Delete, backup);
-            GUILayout.EndHorizontal();
-        }
-
-        private void Ask(Pending what, BackupEntry target, string text = "")
-        {
-            _pending = what;
-            _pendingTarget = target;
-            _pendingText = text;
-            _status = "";
-        }
-
-        private void DrawPending(BackupEntry backup)
-        {
-            switch (_pending)
-            {
-                case Pending.Restore:
-                    GUILayout.Label(Loc.T("ConfirmRestore", backup.World), _wrapStyle);
-                    break;
-                case Pending.Load:
-                    GUILayout.Label(Loc.T("ConfirmLoad", backup.World), _wrapStyle);
-                    break;
-                case Pending.Delete:
-                    GUILayout.Label(Loc.T("ConfirmDelete"), _wrapStyle);
-                    break;
-                case Pending.NewWorld:
-                    GUILayout.Label(Loc.T("NewWorldName"), _wrapStyle);
-                    _pendingText = GUILayout.TextField(_pendingText, 60);
-                    break;
-                case Pending.EditLabel:
-                    GUILayout.Label(Loc.T("LabelHint"), _wrapStyle);
-                    _pendingText = GUILayout.TextField(_pendingText, 60);
-                    break;
-            }
-
-            GUILayout.BeginHorizontal();
-            if (GUILayout.Button(Loc.T(_pending == Pending.NewWorld || _pending == Pending.EditLabel ? "OK" : "Confirm"), GUILayout.Height(28)))
-            {
-                Pending action = _pending;
-                if (action != Pending.NewWorld)
-                    _pending = Pending.None;
-                GUIUtility.keyboardControl = 0;
-                switch (action)
-                {
-                    case Pending.Restore: DoRestore(backup); break;
-                    case Pending.Load: DoLoad(backup); break;
-                    case Pending.Delete: DoDelete(backup); break;
-                    case Pending.NewWorld: DoNewWorld(backup, _pendingText.Trim()); break;
-                    case Pending.EditLabel:
-                        try { _store.SetLabel(backup, _pendingText.Trim()); }
-                        catch (Exception ex) { SetError(ex); }
-                        break;
-                }
-            }
-            if (GUILayout.Button(Loc.T("Cancel"), GUILayout.Height(28)))
-            {
-                _pending = Pending.None;
-                GUIUtility.keyboardControl = 0;
-            }
-            GUILayout.EndHorizontal();
-        }
-
-        private static string KindName(BackupKind kind) => Loc.T("Kind" + kind);
-
-        private static string FormatSize(long bytes)
-        {
-            if (bytes >= 1024 * 1024)
-                return (bytes / (1024f * 1024f)).ToString("0.0") + " MB";
-            return Math.Max(1, bytes / 1024) + " KB";
-        }
-
-        private Texture2D GetThumbnail(string path)
-        {
-            if (string.IsNullOrEmpty(path))
-                return null;
-            if (_thumbnails.TryGetValue(path, out Texture2D tex))
-                return tex;
-
-            tex = null;
-            try
-            {
-                if (File.Exists(path))
-                {
-                    tex = new Texture2D(2, 2);
-                    if (!tex.LoadImage(File.ReadAllBytes(path)))
-                    {
-                        UnityEngine.Object.Destroy(tex);
-                        tex = null;
-                    }
-                }
-            }
-            catch
-            {
-                tex = null;
-            }
-            _thumbnails[path] = tex;
-            return tex;
-        }
-
-        private void ClearThumbnails()
-        {
-            foreach (Texture2D tex in _thumbnails.Values)
-                if (tex != null)
-                    UnityEngine.Object.Destroy(tex);
-            _thumbnails.Clear();
-        }
-
-        private void OpenFolder(string path)
-        {
-            try
-            {
-                if (!Directory.Exists(path))
-                    path = Directory.Exists(_store.BackupsRoot) ? _store.BackupsRoot : Application.persistentDataPath;
-                Application.OpenURL("file:///" + path.Replace('\\', '/'));
-            }
-            catch (Exception ex)
-            {
-                SetError(ex);
-            }
-        }
-
-        private void EnsureStyles()
-        {
-            if (_windowStyle != null && _bgTex != null)
-                return;
-
-            _bgTex = SolidTexture(new Color(0.08f, 0.09f, 0.13f, 1f));
-            _rowTex = SolidTexture(new Color(0.15f, 0.17f, 0.23f, 1f));
-            _rowSelTex = SolidTexture(new Color(0.27f, 0.36f, 0.62f, 1f));
-
-            _windowStyle = new GUIStyle(GUI.skin.window) { padding = new RectOffset(12, 12, 26, 10) };
-            _windowStyle.normal.background = _bgTex;
-            _windowStyle.onNormal.background = _bgTex;
-            _windowStyle.normal.textColor = _windowStyle.onNormal.textColor = new Color(0.85f, 0.9f, 1f);
-            _windowStyle.fontStyle = FontStyle.Bold;
-
-            _rowStyle = new GUIStyle(GUI.skin.button) { alignment = TextAnchor.MiddleLeft, padding = new RectOffset(8, 8, 4, 4), wordWrap = false };
-            _rowStyle.normal.background = _rowTex;
-            _rowStyle.hover.background = _rowSelTex;
-            _rowStyle.normal.textColor = _rowStyle.hover.textColor = Color.white;
-
-            _rowSelectedStyle = new GUIStyle(_rowStyle);
-            _rowSelectedStyle.normal.background = _rowSelTex;
-
-            _headerStyle = new GUIStyle(GUI.skin.label) { fontStyle = FontStyle.Bold, fontSize = 15 };
-            _headerStyle.normal.textColor = new Color(0.75f, 0.85f, 1f);
-
-            _mutedStyle = new GUIStyle(GUI.skin.label) { wordWrap = true };
-            _mutedStyle.normal.textColor = new Color(0.65f, 0.68f, 0.75f);
-
-            _wrapStyle = new GUIStyle(GUI.skin.label) { wordWrap = true };
-            _wrapStyle.normal.textColor = Color.white;
-
-            _statusStyle = new GUIStyle(GUI.skin.label);
-            _statusStyle.normal.textColor = new Color(0.55f, 0.9f, 0.6f);
-
-            _errorStyle = new GUIStyle(GUI.skin.label) { wordWrap = true };
-            _errorStyle.normal.textColor = new Color(1f, 0.45f, 0.4f);
-        }
-
-        private static Texture2D SolidTexture(Color color)
-        {
-            var tex = new Texture2D(1, 1) { hideFlags = HideFlags.HideAndDontSave };
-            tex.SetPixel(0, 0, color);
-            tex.Apply();
-            return tex;
+            string path = world != null ? Path.Combine(Store.BackupsRoot, world) : Store.BackupsRoot;
+            if (!Directory.Exists(path))
+                path = Directory.Exists(Store.BackupsRoot) ? Store.BackupsRoot : Application.persistentDataPath;
+            Application.OpenURL("file:///" + path.Replace('\\', '/'));
         }
     }
 }

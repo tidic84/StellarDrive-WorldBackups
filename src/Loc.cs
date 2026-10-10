@@ -1,6 +1,7 @@
 using System.Collections.Generic;
 using System.Globalization;
 using UnityEngine;
+using UnityEngine.Localization.Settings;
 
 namespace WorldBackups
 {
@@ -10,106 +11,110 @@ namespace WorldBackups
 
         private static readonly Dictionary<string, string> En = new Dictionary<string, string>
         {
-            ["Title"] = "World Backups",
-            ["OpenButton"] = "World Backups ({0})",
-            ["Worlds"] = "Worlds",
-            ["NoWorlds"] = "No world found.\nCreate a world in the game first.",
-            ["SelectWorld"] = "Select a world on the left.",
-            ["CreateBackup"] = "Back up now",
-            ["SaveAndBackup"] = "Save + back up",
-            ["LabelHint"] = "Note (optional)",
-            ["Backups"] = "Backups of \"{0}\"",
-            ["NoBackups"] = "No backup yet for this world.",
+            ["MenuButton"] = "Backups",
+            ["CreateBackupButton"] = "+ Create a backup",
+            ["CreateBackupTitle"] = "Create a backup",
+            ["NoteLabel"] = "Note",
+            ["NameLabel"] = "Name",
+            ["Create"] = "Create",
             ["Load"] = "Load",
             ["Restore"] = "Restore",
-            ["AsNewWorld"] = "As new world",
-            ["Rename"] = "Note",
             ["Delete"] = "Delete",
-            ["Confirm"] = "Confirm",
-            ["Cancel"] = "Cancel",
+            ["AsNewWorld"] = "New world",
+            ["EditNote"] = "Note",
+            ["NewWorldTitle"] = "Restore as a new world",
+            ["EditNoteTitle"] = "Edit note",
+            ["Save"] = "Save",
             ["OK"] = "OK",
             ["OpenFolder"] = "Open folder",
-            ["Refresh"] = "Refresh",
-            ["Close"] = "Close",
-            ["HostToggle"] = "Host (Steam) when loading",
-            ["KindManual"] = "Manual",
-            ["KindAuto"] = "Auto",
+            ["NoBackups"] = "No backup yet",
+            ["Current"] = "in progress",
+            ["KindManual"] = "Manual backup",
+            ["KindAuto"] = "Automatic backup",
             ["KindSafety"] = "Before restore",
             ["KindGame"] = "Game autosave",
-            ["InGameNotice"] = "In game: return to the main menu to restore or load a backup.",
-            ["ClientNotice"] = "You are a client in someone else's world: nothing to back up here.",
-            ["ConfirmRestore"] = "Replace \"{0}\" with this backup? (a safety backup is made first)",
-            ["ConfirmLoad"] = "Restore this backup into \"{0}\" and launch it? (a safety backup is made first)",
+            ["LeaveWarning"] = "You will leave the current game.",
+            ["LeaveWarningSaved"] = "The current game will be saved and closed.",
+            ["ConfirmRestore"] = "Replace \"{0}\" with this backup? A safety backup is made first.",
+            ["ConfirmLoad"] = "Restore this backup into \"{0}\" and launch it? A safety backup is made first.",
             ["ConfirmDelete"] = "Delete this backup permanently?",
-            ["NewWorldName"] = "New world name:",
-            ["Created"] = "Backup created.",
             ["Restored"] = "Backup restored into \"{0}\".",
-            ["CreatedWorld"] = "World \"{0}\" created from backup.",
-            ["Deleted"] = "Backup deleted.",
-            ["Saving"] = "Saving the game...",
+            ["CreatedWorld"] = "World \"{0}\" created from the backup.",
             ["Error"] = "Error: {0}",
-            ["NameEmpty"] = "Name cannot be empty.",
-            ["NameInvalid"] = "Name contains invalid characters.",
+            ["NameEmpty"] = "The name cannot be empty.",
+            ["NameInvalid"] = "The name contains invalid characters.",
             ["NameExists"] = "A world with this name already exists.",
-            ["Current"] = "current",
         };
 
         private static readonly Dictionary<string, string> Fr = new Dictionary<string, string>
         {
-            ["Title"] = "Backups de mondes",
-            ["OpenButton"] = "Backups de mondes ({0})",
-            ["Worlds"] = "Mondes",
-            ["NoWorlds"] = "Aucun monde trouvé.\nCréez d'abord un monde dans le jeu.",
-            ["SelectWorld"] = "Sélectionnez un monde à gauche.",
-            ["CreateBackup"] = "Faire une backup",
-            ["SaveAndBackup"] = "Sauver + backup",
-            ["LabelHint"] = "Note (optionnelle)",
-            ["Backups"] = "Backups de \"{0}\"",
-            ["NoBackups"] = "Aucune backup pour ce monde.",
+            ["MenuButton"] = "Backups",
+            ["CreateBackupButton"] = "+ Créer une backup",
+            ["CreateBackupTitle"] = "Créer une backup",
+            ["NoteLabel"] = "Note",
+            ["NameLabel"] = "Nom",
+            ["Create"] = "Créer",
             ["Load"] = "Charger",
             ["Restore"] = "Restaurer",
+            ["Delete"] = "Supprimer",
             ["AsNewWorld"] = "Nouveau monde",
-            ["Rename"] = "Note",
-            ["Delete"] = "Suppr.",
-            ["Confirm"] = "Confirmer",
-            ["Cancel"] = "Annuler",
+            ["EditNote"] = "Note",
+            ["NewWorldTitle"] = "Restaurer en nouveau monde",
+            ["EditNoteTitle"] = "Modifier la note",
+            ["Save"] = "Enregistrer",
             ["OK"] = "OK",
             ["OpenFolder"] = "Ouvrir le dossier",
-            ["Refresh"] = "Actualiser",
-            ["Close"] = "Fermer",
-            ["HostToggle"] = "Héberger (Steam) au chargement",
-            ["KindManual"] = "Manuelle",
-            ["KindAuto"] = "Auto",
+            ["NoBackups"] = "Aucune backup pour l'instant",
+            ["Current"] = "en cours",
+            ["KindManual"] = "Backup manuelle",
+            ["KindAuto"] = "Backup automatique",
             ["KindSafety"] = "Avant restauration",
             ["KindGame"] = "Autosave du jeu",
-            ["InGameNotice"] = "En jeu : retournez au menu principal pour restaurer ou charger une backup.",
-            ["ClientNotice"] = "Vous êtes client dans le monde d'un autre joueur : rien à sauvegarder ici.",
-            ["ConfirmRestore"] = "Remplacer \"{0}\" par cette backup ? (une backup de sécurité est faite avant)",
-            ["ConfirmLoad"] = "Restaurer cette backup dans \"{0}\" et lancer le monde ? (une backup de sécurité est faite avant)",
-            ["ConfirmDelete"] = "Supprimer définitivement cette backup ?",
-            ["NewWorldName"] = "Nom du nouveau monde :",
-            ["Created"] = "Backup créée.",
+            ["LeaveWarning"] = "Vous allez quitter la partie en cours.",
+            ["LeaveWarningSaved"] = "La partie en cours va être sauvegardée puis fermée.",
+            ["ConfirmRestore"] = "Remplacer \"{0}\" par cette backup ? Une backup de sécurité est faite avant.",
+            ["ConfirmLoad"] = "Restaurer cette backup dans \"{0}\" et la lancer ? Une backup de sécurité est faite avant.",
+            ["ConfirmDelete"] = "Supprimer cette backup de façon permanente ?",
             ["Restored"] = "Backup restaurée dans \"{0}\".",
             ["CreatedWorld"] = "Monde \"{0}\" créé depuis la backup.",
-            ["Deleted"] = "Backup supprimée.",
-            ["Saving"] = "Sauvegarde du jeu en cours...",
             ["Error"] = "Erreur : {0}",
             ["NameEmpty"] = "Le nom ne peut pas être vide.",
             ["NameInvalid"] = "Le nom contient des caractères invalides.",
             ["NameExists"] = "Un monde porte déjà ce nom.",
-            ["Current"] = "actuel",
         };
+
+        public static CultureInfo Culture { get; private set; } = CultureInfo.InvariantCulture;
 
         public static void Init(string language)
         {
             string lang = (language ?? "auto").Trim().ToLowerInvariant();
             if (lang == "auto")
-                lang = Application.systemLanguage == SystemLanguage.French ? "fr" : "en";
+                lang = GameLanguage();
             _table = lang == "fr" ? Fr : En;
-            Culture = CultureInfo.GetCultureInfo(lang == "fr" ? "fr-FR" : "en-US");
+            try
+            {
+                Culture = CultureInfo.GetCultureInfo(lang == "fr" ? "fr-FR" : lang);
+            }
+            catch
+            {
+                Culture = CultureInfo.GetCultureInfo("en-US");
+            }
         }
 
-        public static CultureInfo Culture { get; private set; } = CultureInfo.InvariantCulture;
+        /// <summary>The language picked in the game's own options (falls back to the system language).</summary>
+        private static string GameLanguage()
+        {
+            try
+            {
+                string code = LocalizationSettings.SelectedLocale?.Identifier.Code;
+                if (!string.IsNullOrEmpty(code))
+                    return code.Split('-')[0].ToLowerInvariant();
+            }
+            catch
+            {
+            }
+            return Application.systemLanguage == SystemLanguage.French ? "fr" : "en";
+        }
 
         public static string T(string key)
         {
